@@ -21,6 +21,7 @@ interface MyState {
   }
   Binaries : Object,
   display: string,
+  explanation: string,
   error: string,
   webFormSettings : Object,
   webForm : {
@@ -40,6 +41,7 @@ const INITIAL_STATE = {
   moddleObj : {drgElement:[]},
   Binaries : {},
   display: 'initialized',
+  explanation: '',
   error: 'No error message, please contact the administrator if things do not work as expected.',
   webFormSettings : {},
   webForm : {pure:"",Title:"",Description:"",OutputLabels:{},decisionID:"", RelevantFunctions:[]},
@@ -58,7 +60,7 @@ class App extends Component<{},MyState> {
     this.state = INITIAL_STATE;
   }
 
-  componentDidMount()  {this.switchboard()} //check for parameters to override standard Dropzone startpage
+  componentDidMount()  {this.switchboardInitial()} //check for parameters to override standard Dropzone startpage
   
   //forward function for Dropzone, to fix... once, and other functions
   setErrorMessage(e){  this.setState({error : e}, () => this.setState({display : 'errorMessage'}) ); }
@@ -128,13 +130,24 @@ class App extends Component<{},MyState> {
     }
   }
 
-  switchboard(s = null){
+  async switchboardInitial(){
     let query = new URLSearchParams(window.location.search);
-    if ( !query.get("loc") && String(this.state.DMNxml).length == 0) return;
-    else if( query.get("loc") && String(this.state.DMNxml).length == 0){ this.fetchExternal(query) }
-    else if( query.get("tiny") ) this.buildTinyPage();
-    else if( query.get("settings") ) this.downloadWebsettingExcel();
-    else this.displayForm();
+    //set correct display / action on startup
+    if( query.get("loc") && String(this.state.DMNxml).length == 0){ 
+      this.setState({ display: 'wait' });
+      await this.fetchExternal(query);
+      this.switchboard();
+    }
+    else if( query.get("tiny") ){ this.setState({ explanation: 'tiny' }); }
+    else if( query.get("settings") ){ this.setState({ explanation: 'settings' }); }
+    else{ this.setState({ explanation: 'execute' }); }
+  }
+  switchboard(){
+    this.setState({ explanation: '' });
+    let query = new URLSearchParams(window.location.search);
+    if( query.get("tiny") ){ this.buildTinyPage(); }
+    else if( query.get("settings") ){ this.downloadWebsettingExcel(); } 
+    else{ this.displayForm(); }
   }
 
   //Fetch files from server
@@ -170,7 +183,7 @@ class App extends Component<{},MyState> {
       console.error('Decision table is invalid and failed to parse, see Moddle object and failure message:', this.state.moddleObj, e);
       this.setErrorMessage('The decision table is invalid, please see error log.');
     }
-    this.setState({ display: 'dowloaded' });     
+    this.setState({ explanation: 'dowloaded' });     
   }
 async downloadWebsettingExcel(){
     let DMNformData = await Moddle2FormdataObject(this.state.moddleObj);
@@ -181,11 +194,13 @@ async downloadWebsettingExcel(){
     let fileName = 'FormField_'+ this.state.webForm.Title.replace(/\s+/, '_')+'.csv';
     saveAs(blob, fileName);
 
-    this.setState({ display: 'dowloaded' }); 
+    this.setState({ explanation: 'dowloaded' }); 
   }
 
   formProcessor(event){
     event.preventDefault();
+    this.setState({explanation : 'docsProcessing'})
+
     let engineResult;
     try {
       let formResult = formHandler(event.target);
@@ -220,6 +235,7 @@ async downloadWebsettingExcel(){
 
   render() {
     const display = this.state.display;
+    const explanation = this.state.explanation;
     
     const newUploadButton = <form id="newUploadButton" className="pure-form pure-form-aligned">
                               <button className="pure-button pure-input-1-2" onClick={() => this.state = INITIAL_STATE}>New Upload</button>
@@ -228,25 +244,44 @@ async downloadWebsettingExcel(){
                             <button style={{paddingRight: 2}} className="pure-button pure-input-1-2" onClick={() => this.prepareDecisions()}>Back to form</button>
                             <button className="pure-button pure-input-1-2" onClick={() => this.state = INITIAL_STATE}>New Upload</button>
                           </form>;
-    const DownloadedFiles = <div>Please see downloaded files in your browser or local folder</div>
+    const DownloadedFiles = <h2>Please see downloaded files in your browser or local folder</h2>
+    const Footer = <div id="menuFooter"> <a href='http://legallinq.com'title="Homepage van Legal LinQ" className="text-light">Legal LinQ Homepage</a>
+                  </div> 
+
 
     return (
       <div id="outerWrapper">
         { display == 'initialized' && 
-          <div className="innerWrapper dropzone"><DropzoneElement 
-            uploaded={this.uploadedFiles}
-            allowedFileTypes = '.xlsx, .dmn, .docx'
+          <div className="innerWrapper dropzone">
+            <DropzoneElement 
+              uploaded={this.uploadedFiles}
+              allowedFileTypes = '.xlsx, .dmn, .docx'
             />
           </div>
         }
-        { display == 'dowloaded' && 
-          <div className="innerWrapper dropzone"><DropzoneElement 
-            uploaded={this.uploadedFiles}
-            allowedFileTypes = '.xlsx, .dmn, .docx'
-            />
-            <div><h2>Please see downloaded files in your browser or local folder</h2></div>
-          </div>
-
+        { explanation == 'settings' && 
+            <div><h2>Provide DMN file, possibly also an Excel file, to download settings based on DMN model</h2></div>
+        }
+        { explanation == 'tiny' && 
+            <div><h2>Provide files (DMN/Excel/Docx), a single HTML page will be returned that is a standalone decision tool.</h2></div>
+        }
+        { explanation == 'execute' && 
+            <div>
+              <h2>
+                Provide files (DMN/Excel/Docx) to generate the decision tool.
+              </h2>
+              <p>Other available options are:</p>
+              <ul>
+                <i><a href= "?tiny=true">Standalone page</a> (advised!)</i>
+                <li><a href= "?settings=true">Settings, for updating an Excel or generating a CSV settingsfile</a></li>
+              </ul>
+            </div>
+        }
+        { explanation == 'docsProcessing' && 
+            <div><h2>Documents are being processed.</h2></div>
+        }
+        { explanation == 'dowloaded' && 
+            <div>{DownloadedFiles}</div>
         }
         { display == 'wait' && <div className="innerWrapper"> ... one moment please ... </div>
         }
@@ -276,6 +311,16 @@ async downloadWebsettingExcel(){
             <button className="pure-button" onClick={() => window.location.reload()}>Return to start</button>
           </div>
         }
+      
+        { <div id="Footer">
+          <hr></hr>
+          <div>
+            <p>This Demo is for non-production purposes. Please see Github for more info.</p>
+            {Footer}
+            {newUploadButton}
+          </div>
+        </div> }
+
       </div>
     );
   }
